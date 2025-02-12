@@ -1,0 +1,89 @@
+import requests
+import pandas as pd
+from openpyxl import Workbook
+from openpyxl.utils.dataframe import dataframe_to_rows
+import time
+import schedule
+
+# Function to fetch live data from the API
+def fetch_crypto_data():
+    url = "https://api.coingecko.com/api/v3/coins/markets"
+    params = {
+        "vs_currency": "usd",
+        "order": "market_cap_desc",
+        "per_page": 50,
+        "page": 1,
+        "sparkline": False
+    }
+    response = requests.get(url, params=params)
+    data = response.json()
+
+    # Extract required fields
+    crypto_data = []
+    for coin in data:
+        crypto_data.append({
+            "Name": coin["name"],
+            "Symbol": coin["symbol"].upper(),
+            "Price (USD)": coin["current_price"],
+            "Market Cap": coin["market_cap"],
+            "24h Volume": coin["total_volume"],
+            "24h Change (%)": coin["price_change_percentage_24h"]
+        })
+    return pd.DataFrame(crypto_data)
+
+# Function to perform analysis on the data
+def analyze_data(df):
+    analysis = {}
+    analysis["Top 5 by Market Cap"] = df.nlargest(5, "Market Cap")[["Name", "Market Cap"]]
+    analysis["Average Price"] = df["Price (USD)"].mean()
+    analysis["Highest 24h Change"] = df.loc[df["24h Change (%)"].idxmax()]
+    analysis["Lowest 24h Change"] = df.loc[df["24h Change (%)"].idxmin()]
+    return analysis
+
+# Function to save data to Excel
+def save_to_excel(df, analysis):
+    file_name = "crypto_data.xlsx"
+    
+    # Create a new workbook
+    wb = Workbook()
+    ws_data = wb.active
+    ws_data.title = "Live Data"
+    
+    # Write live data to sheet
+    for row in dataframe_to_rows(df, index=False, header=True):
+        ws_data.append(row)
+
+    # Add analysis sheet
+    ws_analysis = wb.create_sheet(title="Analysis")
+    ws_analysis.append(["Metric", "Value"])
+    ws_analysis.append(["Top 5 by Market Cap", ""])
+    for _, row in analysis["Top 5 by Market Cap"].iterrows():
+        ws_analysis.append([row["Name"], row["Market Cap"]])
+
+    ws_analysis.append(["Average Price", analysis["Average Price"]])
+    ws_analysis.append(["Highest 24h Change", f"{analysis['Highest 24h Change']['Name']} ({analysis['Highest 24h Change']['24h Change (%)']}%)"])
+    ws_analysis.append(["Lowest 24h Change", f"{analysis['Lowest 24h Change']['Name']} ({analysis['Lowest 24h Change']['24h Change (%)']}%)"])
+
+    # Save workbook
+    wb.save(file_name)
+    print(f"Data saved to {file_name}")
+
+# Main function to update data
+def update_data():
+    print("Fetching live data...")
+    df = fetch_crypto_data()
+    print("Analyzing data...")
+    analysis = analyze_data(df)
+    print("Saving data to Excel...")
+    save_to_excel(df, analysis)
+
+# Schedule the updates every 5 minutes
+schedule.every(5).minutes.do(update_data)
+
+# Initial run
+update_data()
+
+print("Live data updating every 5 minutes. Press Ctrl+C to stop.")
+while True:
+    schedule.run_pending()
+    time.sleep(1)
